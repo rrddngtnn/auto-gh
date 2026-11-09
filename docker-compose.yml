@@ -1,0 +1,11 @@
+services:
+  auto-gh:
+    build: .
+    volumes:
+      - auto_gh_data:/data
+    env_file:
+      - .env.example
+    command: ["status"]
+
+volumes:
+  auto_gh_data:
