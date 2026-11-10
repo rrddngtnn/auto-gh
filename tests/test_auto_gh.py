@@ -10,6 +10,7 @@ from auto_gh.mailbox import (
     ForwardedRestCatchAllAdapter,
     GmailDotAdapter,
     ImapCatchAllAdapter,
+    MailCxAdapter,
     ManualMailboxAdapter,
     RestMailboxAdapter,
     SqliteInboxAdapter,
@@ -106,6 +107,10 @@ def test_imap_catchall_domain_rotation():
     assert "." in g0["address"].split("@")[0]
     assert g0["address"].split("@")[0].replace(".", "") == "sampleuser"
     assert g0["address"] != g1["address"]
+
+    mcx = MailCxAdapter(domains=["uqu.me", "ddker.com"])
+    mc0 = mcx.create_inbox("seed-mc0", index=0)
+    assert mc0["provider"] == "mailcx" and mc0["address"].endswith("@uqu.me")
 
     with tempfile.TemporaryDirectory() as tmp:
         mdb = os.path.join(tmp, "mail.db")

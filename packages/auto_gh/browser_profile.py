@@ -222,6 +222,75 @@ def _fill_launch_code(page, code: str, log_fn=None) -> None:
             btn.click(timeout=5000)
 
 
+def _warm_new_account(page, username: str, log_fn=None) -> dict:
+    """Create initial repository and set public profile bio/location to warm a newly verified GitHub session."""
+    import random
+
+    warm_info = {"repo_created": None, "profile_updated": False}
+    repo_name = random.choice(("hello-world", "notes", "starter-kit", "workspace", "sandbox"))
+    try:
+        page.goto("https://github.com/new", wait_until="domcontentloaded", timeout=35000)
+        page.wait_for_timeout(2000)
+        repo_in = page.locator("#repository-name-input").first
+        if repo_in.count() > 0 and repo_in.is_visible():
+            repo_in.fill(repo_name, timeout=6000)
+            page.wait_for_timeout(1800)
+            clicked = bool(
+                page.evaluate(
+                    """() => {
+                        const btns = [...document.querySelectorAll('button')];
+                        const b = btns.find(x => x.offsetParent !== null && !x.disabled && (x.textContent || '').trim() === 'Create repository');
+                        if (!b) return false;
+                        b.click();
+                        return true;
+                    }"""
+                )
+            )
+            if clicked:
+                page.wait_for_timeout(5000)
+                if f"/{username}/" in (page.url or ""):
+                    warm_info["repo_created"] = repo_name
+                    if log_fn:
+                        log_fn(f"warmed account with initial repo: {page.url}")
+    except Exception as exc:
+        if log_fn:
+            log_fn(f"warm repo note: {exc}")
+
+    try:
+        page.goto(f"https://github.com/{username}", wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(1500)
+        opened = bool(
+            page.evaluate(
+                """() => {
+                    const b = [...document.querySelectorAll('button')].find(x => (x.textContent || '').trim() === 'Edit profile' || x.classList.contains('js-profile-editable-edit-button'));
+                    if (!b) return false;
+                    b.click();
+                    return true;
+                }"""
+            )
+        )
+        if opened:
+            page.wait_for_timeout(1000)
+            name_in = page.locator("#user_profile_name").first
+            bio_in = page.locator("#user_profile_bio").first
+            if name_in.count() > 0 and name_in.is_visible():
+                name_in.fill(username.capitalize(), timeout=5000)
+            if bio_in.count() > 0 and bio_in.is_visible():
+                bio_in.fill("Building software and exploring open source.", timeout=5000)
+            page.evaluate(
+                """() => {
+                    const b = [...document.querySelectorAll('button')].find(x => (x.textContent || '').trim() === 'Save');
+                    if (b) b.click();
+                }"""
+            )
+            page.wait_for_timeout(2000)
+            warm_info["profile_updated"] = True
+    except Exception as exc:
+        if log_fn:
+            log_fn(f"warm profile note: {exc}")
+    return warm_info
+
+
 def _is_verify_screen(page) -> bool:
     try:
         loc = page.locator("input[id^='launch-code-'], #otp, input[name='otp'], input[autocomplete='one-time-code']")
@@ -502,6 +571,12 @@ def signup_github_session(
         cookies = {c.get("name", ""): c.get("value", "") for c in ctx.cookies() if "github.com" in c.get("domain", "")}
         is_suspended = "/suspended" in (page.url or "")
         logged_in = (cookies.get("logged_in") == "yes" or "user_session" in cookies) and not is_suspended
+        warm_info = {}
+        if logged_in:
+            warm_info = _warm_new_account(page, accepted_username, log_fn=_log)
+            cookies = {c.get("name", ""): c.get("value", "") for c in ctx.cookies() if "github.com" in c.get("domain", "")}
+            is_suspended = "/suspended" in (page.url or "")
+            logged_in = (cookies.get("logged_in") == "yes" or "user_session" in cookies) and not is_suspended
         stage = "suspended" if is_suspended else ("verified" if logged_in else "post_submit")
         _log(f"done: stage={stage} logged_in={logged_in} cookies={sorted(cookies.keys())}")
         if st_path and logged_in:
@@ -514,6 +589,7 @@ def signup_github_session(
             "email": email_addr,
             "url": page.url,
             "otp_used": sorted(used_codes),
+            "warm_info": warm_info,
             "storage_state": str(st_path) if logged_in else "",
             "cookie_names": sorted(cookies.keys()),
         }

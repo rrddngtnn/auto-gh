@@ -120,6 +120,7 @@ PANEL_HTML = """<!DOCTYPE html>
       <label>Count <input type="number" id="st-count" value="4" min="1" max="50" style="width:70px"></label>
       <label>Mailbox
         <select id="st-mode">
+          <option value="mailcx">Mail.cx Disposable (uqu.me / ddker.com / 9k3r.com)</option>
           <option value="gmail_dot">Gmail Dot-Trick IMAP (GMAIL_ADDRESS)</option>
           <option value="catchall">Catch-All Custom Domains (Round-Robin)</option>
           <option value="rest">REST Dedicated Inbox</option>

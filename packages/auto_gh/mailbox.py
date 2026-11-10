@@ -378,7 +378,79 @@ class GmailDotAdapter(ImapCatchAllAdapter):
         }
 
 
-MAILBOX_DRIVERS = ("forwarded_rest", "rest", "imap", "gmail_dot", "sqlite", "manual")
+class MailCxAdapter:
+    """BYOP Mail.cx implicit disposable inbox adapter (GET /v1/config, GET /v1/inbox/<address>)."""
+
+    def __init__(self, base: str | None = None, domains: list[str] | None = None):
+        load_dotenv_file()
+        self.base = (base or os.environ.get("MAILCX_API_URL") or "https://mail.cx/v1").rstrip("/")
+        raw_doms = os.environ.get("MAILCX_DOMAINS", "uqu.me,ddker.com,9k3r.com")
+        self.domains = domains or [d.strip() for d in raw_doms.split(",") if d.strip()]
+        self.s = requests.Session()
+        self.s.headers.update({"User-Agent": UA, "Accept": "application/json"})
+
+    def create_inbox(self, seed: str, index: int = 0, ttl: str = "30d") -> dict:
+        creds = make_credentials(seed)
+        dom = self.domains[index % len(self.domains)]
+        return {
+            "address": f"{creds['handle']}@{dom}",
+            "token": "mailcx",
+            "domain": dom,
+            "expires_at": None,
+            "username": creds["username"],
+            "password": creds["password"],
+            "provider": "mailcx",
+        }
+
+    def poll_otp(
+        self,
+        address: str,
+        token: str | None = None,
+        timeout_sec: int = 180,
+        poll_sec: float = 4.0,
+        patterns: tuple[str, ...] = OTP_PATTERNS,
+        exclude_codes: set[str] | None = None,
+    ) -> tuple[str | None, dict | None]:
+        from urllib.parse import quote
+
+        compiled = [re.compile(p) for p in patterns]
+        excluded = set(exclude_codes or ())
+        encoded = quote(address.strip().lower(), safe="")
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            try:
+                r = self.s.get(f"{self.base}/inbox/{encoded}", timeout=28)
+                if r.status_code == 200 and r.content:
+                    data = r.json()
+                    items = (
+                        data
+                        if isinstance(data, list)
+                        else (data.get("emails") or data.get("items") or [])
+                        if isinstance(data, dict)
+                        else []
+                    )
+                    for msg in items:
+                        raw = " ".join(
+                            str(msg.get(f) or "")
+                            for f in ("body", "text", "html", "content", "preview_text", "subject")
+                        )
+                        clean = re.sub(r"<[^>]+>", " ", raw)
+                        m_dash = re.search(r"\b(\d{4})-(\d{4})\b", clean)
+                        if m_dash:
+                            cand = m_dash.group(1) + m_dash.group(2)
+                            if cand not in excluded:
+                                return cand, {"subject": msg.get("subject", "")}
+                        for pat in compiled:
+                            hit = pat.search(clean)
+                            if hit and hit.group(1) not in excluded:
+                                return hit.group(1), {"subject": msg.get("subject", "")}
+            except requests.RequestException:
+                pass
+            time.sleep(poll_sec)
+        return None, None
+
+
+MAILBOX_DRIVERS = ("forwarded_rest", "rest", "imap", "gmail_dot", "mailcx", "sqlite", "manual")
 
 
 def get_mailbox_driver(driver_name: str | None = None):
@@ -393,6 +465,8 @@ def get_mailbox_driver(driver_name: str | None = None):
         return ImapCatchAllAdapter()
     if kind == "gmail_dot":
         return GmailDotAdapter()
+    if kind == "mailcx":
+        return MailCxAdapter()
     if kind == "sqlite":
         return SqliteInboxAdapter()
     if kind == "manual":
